@@ -1,0 +1,21 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // Self-host template. Point DOMAIN at a zone you control, route
+  // *.yourdomain/* and yourdomain/* to this worker on that zone, and set
+  // ISSUER to your identity provider (JWKS served at ISSUER/api/auth/jwks,
+  // the better-auth convention, or set JWKS_URL). This entry applies no
+  // policy: any authenticated user gets any name, unlimited. Supply a Policy
+  // through createEdge for ownership, quotas, or gating.
+  "name": "neko-edge",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-07-01",
+  "durable_objects": {
+    "bindings": [{ "name": "TUNNEL", "class_name": "Tunnel" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Tunnel"] }],
+  "vars": {
+    "DOMAIN": "example.com",
+    "ISSUER": "https://auth.example.com"
+  },
+  "observability": { "enabled": true }
+}

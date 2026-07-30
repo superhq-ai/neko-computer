@@ -1,0 +1,33 @@
+[package]
+name = "neko"
+version = "0.2.0"
+description = "Expose shuru sandbox ports to the web"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "neko"
+path = "src/main.rs"
+
+[dependencies]
+shuru-sdk = "0.3.7"
+include_dir = "0.7"
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "io-std", "time", "signal", "fs"] }
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+futures-util = "0.3"
+tokio-stream = "0.1"
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+rustls = { version = "0.23", features = ["aws_lc_rs"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rand = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+dirs = "5"
+flate2 = "1"
+tar = "0.4"

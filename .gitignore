@@ -1,0 +1,11 @@
+/target
+**/*.rs.bk
+
+node_modules
+dist
+.wrangler
+.dev.vars
+*.tsbuildinfo
+
+.env
+.DS_Store

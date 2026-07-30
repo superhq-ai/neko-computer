@@ -1,0 +1,19 @@
+name: Rust
+
+on:
+  push:
+    branches: [main]
+    paths: ["crates/**", "Cargo.toml", "Cargo.lock", ".github/workflows/rust.yml"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: build and unit tests
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test -p neko
