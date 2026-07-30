@@ -14,11 +14,11 @@ const settings = {
 const THEMES = ["theme-light", "theme-solarized-dark", "theme-monokai"];
 
 // WTerm owns classes on this element too (wterm, focused); only ever touch
-// the theme classes, never replace className wholesale.
+// the theme classes, never replace className wholesale. The chrome stays
+// Metal-glass regardless; themes recolor the grid alone.
 function applyTheme(name) {
   for (const t of THEMES) termEl.classList.remove(t);
   if (name !== "default") termEl.classList.add(name);
-  document.body.dataset.theme = name;
   themeEl.value = name;
 }
 applyTheme(settings.theme);

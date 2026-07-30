@@ -1,30 +1,13 @@
+/* Chrome over the Metal-glass tokens (vendor/tokens.css), always dark; the
+   theme picker recolors only the terminal grid. */
 :root {
-  --bar-bg: #17161d;
-  --bar-fg: #d7d5e0;
-  --bar-dim: #8a8797;
-  --bar-line: #2a2833;
-  --page-bg: #101014;
-}
-[data-theme="theme-light"] {
-  --bar-bg: #f4f3f6;
-  --bar-fg: #24232e;
-  --bar-dim: #6f6c7c;
-  --bar-line: #dedbe5;
-  --page-bg: #ffffff;
-}
-[data-theme="theme-solarized-dark"] {
-  --bar-bg: #00212b;
-  --bar-fg: #93a1a1;
-  --bar-dim: #586e75;
-  --bar-line: #073642;
-  --page-bg: #002b36;
-}
-[data-theme="theme-monokai"] {
-  --bar-bg: #1e1f1a;
-  --bar-fg: #f8f8f2;
-  --bar-dim: #90918b;
-  --bar-line: #33342c;
-  --page-bg: #272822;
+  --page-bg: var(--mg-canvas);
+  --bar-bg: var(--mg-shell);
+  --bar-fg: var(--mg-fg);
+  --bar-dim: var(--mg-fg-muted);
+  --bar-line: var(--mg-line);
+  --bar-line-hi: var(--mg-line-hi);
+  --bar-danger: var(--mg-danger);
 }
 
 * { box-sizing: border-box; }
@@ -36,7 +19,7 @@ body {
   display: flex;
   flex-direction: column;
   background: var(--page-bg);
-  font: 13px/1.4 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font: 13px/1.4 var(--mg-font-mono);
 }
 
 #bar {
@@ -62,20 +45,27 @@ body {
   cursor: pointer;
   padding: 2px 4px;
 }
-#status.down { color: #d4737f; }
+#status.down { color: var(--bar-danger); }
 #theme {
   background: none;
   color: var(--bar-dim);
-  border: 1px solid var(--bar-line);
-  border-radius: 6px;
+  border: 1px solid var(--bar-line-hi);
+  border-radius: var(--mg-radius-sm);
   font: inherit;
   font-size: 12px;
   padding: 3px 6px;
   cursor: pointer;
+  transition: color var(--mg-duration-fast);
 }
 #theme:hover { color: var(--bar-fg); }
 
 #wrap { flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
 #terminal { width: 100%; height: 100%; }
-/* Flush terminal, no floating-card look. */
-.wterm { border-radius: 0; box-shadow: none; }
+/* Flush terminal, no floating-card look; the default grid sits on the
+   canvas so the page reads as one surface. */
+.wterm {
+  border-radius: 0;
+  box-shadow: none;
+  --term-bg: var(--mg-canvas);
+  --term-font-family: var(--mg-font-mono);
+}
