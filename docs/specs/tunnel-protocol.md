@@ -13,9 +13,15 @@ The Worker reads the Host header. For `<sub>.neko.computer` it derives `<sub>` (
 The connector opens a WebSocket:
 
 ```
-GET wss://<sub>.neko.computer/__neko/connect
+GET wss://<sub>.neko.computer/__neko/connect?org=<organization-id>
 Authorization: Bearer <jwt>
 ```
+
+`org` is the immutable SuperHQ organization id that owns the resource. The CLI
+accepts a workspace slug through `--workspace/-w`, resolves it through the
+identity provider, and sends the id; released public clients that omit it are
+assigned to the signed `personalOrg` by the hosted policy. `private=1` changes
+visitor access, not ownership.
 
 The Worker verifies the JWT before routing the connect: a missing, invalid, or deny-listed token is refused here and the tunnel never opens. On success the Durable Object accepts the socket with the hibernation API and stores it as the connector for that subdomain. One connector per subdomain; a reconnect by the same account replaces the stored socket. WebSocket hibernation keeps an idle tunnel near zero cost.
 
@@ -98,7 +104,12 @@ These are deployment-supplied through createEdge options and the policy seam; th
   ```
 
 - **Rate limits.** The Tunnel Durable Object throttles requests with a token bucket (burst 100, refill 60 per second), returning 429 when exceeded, generous for a dev server but a cap against amplification. A `Limiter` Durable Object keyed by connector IP caps tunnel creation at 30 per 60 seconds, checked in the Worker before a connect is routed.
-- **Per-account quotas.** The connector JWT carries the account plan. On connect the Worker enforces a daily creation cap with a `Limiter` keyed by user id, and the Tunnel Durable Object enforces a concurrent-tunnel cap through an `Account` Durable Object that holds the subdomains a user has open, keyed by name so a reconnect does not double count and a disconnect frees the slot. Free plan is 100 per day and 5 concurrent.
+- **Per-workspace quotas.** The hosted connector JWT carries membership and
+  per-workspace plans. Its policy keys daily, concurrent, and named limits by
+  the immutable `org` selected at connect. A released public client with no
+  `org` is assigned to its signed personal workspace. Quota storage remains a
+  deployment-policy concern; the open transport only carries the owner through
+  connect, liveness, kill, and close callbacks.
 
 ## Connector-served endpoints
 

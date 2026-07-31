@@ -135,22 +135,23 @@ pub async fn run(
     claimed: bool,
     backend: Backend,
     token: &str,
-    private_org: Option<&str>,
+    owner_org: &str,
+    private: bool,
     term: Option<TermBridge>,
     ready: impl FnOnce(),
 ) -> Result<()> {
     // The web terminal is a shell into the sandbox; it never rides a tunnel
     // that any visitor can load. The CLI refuses the flag combination too;
     // this is the backstop.
-    let term = if private_org.is_some() { term } else { None };
+    let term = if private { term } else { None };
     let domain = crate::dist::domain();
     let mut params: Vec<String> = Vec::new();
     if claimed {
         params.push("claim=1".to_string());
     }
-    if let Some(org) = private_org {
+    params.push(format!("org={owner_org}"));
+    if private {
         params.push("private=1".to_string());
-        params.push(format!("org={org}"));
     }
     let query = if params.is_empty() {
         String::new()

@@ -1,7 +1,7 @@
 import type { Env } from "./env";
 
 // Fixed-window counter. The window and cap come from the caller, so one class
-// backs both the per-IP creation rate and the per-account daily cap.
+// backs both the per-IP creation rate and deployment-defined daily caps.
 export class Limiter {
   private count = 0;
   private windowStart = 0;

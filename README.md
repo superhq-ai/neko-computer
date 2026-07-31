@@ -22,9 +22,11 @@ Or with Homebrew: `brew install superhq-ai/tap/neko`. Update later with `neko up
 ```
 neko login                              # sign in via the SuperHQ device grant (app.superhq.ai)
 neko tunnel 3000                        # tunnel a local 127.0.0.1:3000 port (no sandbox)
+neko tunnel 3000 --workspace acme       # own the public tunnel in a SuperHQ workspace
 
 neko run --port 3000 -- npm run dev     # reach the sandbox from your machine, no account
 neko run --tunnel 3000 -- npm run dev   # anonymous, ephemeral sandbox, public URL
+neko run --tunnel 3000 -w acme -- npm run dev
 neko run alice --tunnel 3000 -- npm run dev            # a persistent named computer
 neko run base --allow-net --checkpoint clean -- sh -c 'apt-get install -y python3'   # build a reusable checkpoint
 neko run web --from base@clean --tunnel 3000 -- python3 -m http.server 3000

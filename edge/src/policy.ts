@@ -16,6 +16,9 @@ export interface ConnectContext {
   // Account of the currently attached connector, null when none. A policy
   // that does not want live tunnels replaced across accounts denies here.
   liveUser: string | null;
+  // Owning workspace of the attached connector. Null on connectors opened by
+  // a pre-workspace client before their next reconnect.
+  liveOrg: string | null;
   // Verified JWT claims from the configured identity provider.
   claims: Record<string, unknown>;
   ip: string;
@@ -24,16 +27,16 @@ export interface ConnectContext {
 export type ConnectVerdict =
   // access restricts visitors to holders of a tunnel-auth token for org;
   // the transport enforces it, the policy decides it.
-  | { action: "allow"; access?: { org: string } }
+  | { action: "allow"; owner?: { org: string }; access?: { org: string } }
   // The tunnel opens, but visitors are redirected instead of proxied.
-  | { action: "gate"; redirect: string }
+  | { action: "gate"; redirect: string; owner?: { org: string } }
   | { action: "deny"; status: number; message: string };
 
 export interface Policy<E = unknown> {
   // Called from the Tunnel object before the connector socket is accepted.
   connect(ctx: ConnectContext, env: E): Promise<ConnectVerdict>;
   // The connector for sub closed; whatever connect counted can be released.
-  closed?(ctx: { userId: string; sub: string }, env: E): Promise<void>;
+  closed?(ctx: { userId: string; org: string | null; sub: string }, env: E): Promise<void>;
 }
 
 export const allowAll: Policy = {

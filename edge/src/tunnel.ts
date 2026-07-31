@@ -45,6 +45,9 @@ export function forbidsBody(status: number): boolean {
 interface Attachment {
   user: string;
   sub: string;
+  // Resource owner, separate from private visitor access. Missing only on a
+  // connector accepted before workspace ownership shipped.
+  owner?: { org: string };
   gate: boolean;
   redirect?: string;
   // Present on a private tunnel: visitors need a tunnel-auth token for org.
@@ -93,7 +96,12 @@ export class Tunnel {
       const att = this.connector?.deserializeAttachment() as Attachment | null;
       return new Response(null, {
         status: this.connector ? 200 : 410,
-        headers: att?.user ? { "x-neko-user": att.user } : undefined,
+        headers: att?.user
+          ? {
+              "x-neko-user": att.user,
+              ...(att.owner?.org ? { "x-neko-org": att.owner.org } : {}),
+            }
+          : undefined,
       });
     }
 
@@ -106,7 +114,13 @@ export class Tunnel {
         return new Response(null, { status: 410 });
       }
       const att = ws.deserializeAttachment() as Attachment | null;
-      if (!att?.user || att.user !== url.searchParams.get("user")) {
+      const user = url.searchParams.get("user");
+      const org = url.searchParams.get("org");
+      if (!att?.user) {
+        return new Response(null, { status: 403 });
+      }
+      if (org && !att.owner?.org) return new Response(null, { status: 428 });
+      if (org ? att.owner?.org !== org : !user || att.user !== user) {
         return new Response(null, { status: 403 });
       }
       try {
@@ -138,7 +152,17 @@ export class Tunnel {
       }
 
       const verdict = await activePolicy().connect(
-        { userId: user, sub, wantsClaim, wantsPrivate, org, liveUser: this.liveUser(), claims, ip },
+        {
+          userId: user,
+          sub,
+          wantsClaim,
+          wantsPrivate,
+          org,
+          liveUser: this.liveUser(),
+          liveOrg: this.liveOrg(),
+          claims,
+          ip,
+        },
         this.env,
       );
       if (verdict.action === "deny") {
@@ -151,6 +175,7 @@ export class Tunnel {
       const att: Attachment = {
         user,
         sub,
+        owner: verdict.owner,
         gate: verdict.action === "gate",
         redirect: verdict.action === "gate" ? verdict.redirect : undefined,
         access: verdict.action === "allow" ? verdict.access : undefined,
@@ -522,7 +547,10 @@ export class Tunnel {
     }
     const att = ws.deserializeAttachment() as Attachment | null;
     if (att?.user && att?.sub) {
-      await activePolicy().closed?.({ userId: att.user, sub: att.sub }, this.env);
+      await activePolicy().closed?.(
+        { userId: att.user, org: att.owner?.org ?? null, sub: att.sub },
+        this.env,
+      );
     }
     this.dropConnector();
   }
@@ -537,6 +565,12 @@ export class Tunnel {
     if (!this.connector) return null;
     const att = this.connector.deserializeAttachment() as Attachment | null;
     return att?.user ?? "";
+  }
+
+  private liveOrg(): string | null {
+    if (!this.connector) return null;
+    const att = this.connector.deserializeAttachment() as Attachment | null;
+    return att?.owner?.org ?? null;
   }
 
   private dropConnector() {

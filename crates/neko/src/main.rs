@@ -43,14 +43,18 @@ enum Command {
         ports: Vec<String>,
         #[arg(long)]
         subdomain: Option<String>,
+        /// SuperHQ workspace that owns the tunnel. Accepts its slug; defaults
+        /// to your personal workspace.
+        #[arg(long, short = 'w', value_name = "SLUG")]
+        workspace: Option<String>,
         /// Only workspace members may visit the tunnel; they sign in with
-        /// their SuperHQ account. Bare --private means your personal
-        /// workspace, or pass a workspace slug.
+        /// their SuperHQ account. Bare --private uses --workspace or your
+        /// personal workspace; its optional slug remains supported.
         #[arg(long, value_name = "WORKSPACE", num_args = 0..=1, default_missing_value = "")]
         private: Option<String>,
         /// Serve a web terminal into the sandbox at /__neko/term. Opens a
-        /// private tunnel on its own (personal workspace unless --private
-        /// names one); add --tunnel to also expose an app port.
+        /// private tunnel on its own (personal unless --workspace or
+        /// --private names one); add --tunnel to also expose an app port.
         #[arg(long)]
         term: bool,
         /// Let the sandbox reach the network. Off by default: the guest boots
@@ -83,9 +87,13 @@ enum Command {
         port: u16,
         #[arg(long)]
         subdomain: Option<String>,
+        /// SuperHQ workspace that owns the tunnel. Accepts its slug; defaults
+        /// to your personal workspace.
+        #[arg(long, short = 'w', value_name = "SLUG")]
+        workspace: Option<String>,
         /// Only workspace members may visit; they sign in with their SuperHQ
-        /// account. Bare --private means your personal workspace, or pass a
-        /// workspace slug.
+        /// account. Bare --private uses --workspace or your personal
+        /// workspace; its optional slug remains supported.
         #[arg(long, value_name = "WORKSPACE", num_args = 0..=1, default_missing_value = "")]
         private: Option<String>,
     },
@@ -119,6 +127,7 @@ async fn main() -> anyhow::Result<()> {
             tunnel,
             ports,
             subdomain,
+            workspace,
             private,
             term,
             allow_net,
@@ -135,6 +144,7 @@ async fn main() -> anyhow::Result<()> {
                 tunnel,
                 ports,
                 subdomain,
+                workspace,
                 private,
                 term,
                 allow_net,
@@ -150,30 +160,37 @@ async fn main() -> anyhow::Result<()> {
         Command::Tunnel {
             port,
             subdomain,
+            workspace,
             private,
         } => {
             let token = login::access_jwt().await?;
-            let audience = match private {
-                None => None,
-                Some(selector) => Some(login::resolve_workspace(&selector).await?),
-            };
+            let owner =
+                login::resolve_tunnel_workspace(workspace.as_deref(), private.as_deref()).await?;
+            let is_private = private.is_some();
             let claimed = subdomain.is_some();
             let sub = subdomain.unwrap_or_else(names::random_name);
             let domain = dist::domain();
-            let org = audience.as_ref().map(|(id, _)| id.as_str());
-            let label = audience.as_ref().map(|(_, label)| label.clone());
             let cat = mascot::Mascot::start("opening tunnel...");
             let ready_cat = cat.clone();
-            let outcome = tunnel::run(&sub, claimed, tunnel::Backend::Local(port), &token, org, None, || {
-                ready_cat.finish();
-                match &label {
-                    Some(who) => {
-                        println!("(=^..^=)つ tunnel open: https://{sub}.{domain} -> 127.0.0.1:{port} (private: {who})")
-                    }
-                    None => println!("(=^..^=)つ tunnel open: https://{sub}.{domain} -> 127.0.0.1:{port} (public)"),
-                }
-                println!("waiting for requests, press ctrl-c to stop");
-            })
+            let outcome = tunnel::run(
+                &sub,
+                claimed,
+                tunnel::Backend::Local(port),
+                &token,
+                &owner.0,
+                is_private,
+                None,
+                || {
+                    ready_cat.finish();
+                    println!("(=^..^=)つ tunnel open: https://{sub}.{domain} -> 127.0.0.1:{port}");
+                    println!(
+                        "workspace: {} · visibility: {}",
+                        owner.1,
+                        if is_private { "private" } else { "public" },
+                    );
+                    println!("waiting for requests, press ctrl-c to stop");
+                },
+            )
             .await;
             cat.finish();
             outcome

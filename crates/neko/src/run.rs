@@ -21,6 +21,7 @@ pub struct RunArgs {
     pub tunnel: Option<u16>,
     pub ports: Vec<String>,
     pub subdomain: Option<String>,
+    pub workspace: Option<String>,
     pub private: Option<String>,
     pub term: bool,
     pub allow_net: bool,
@@ -85,6 +86,9 @@ pub async fn run(args: RunArgs) -> Result<()> {
         (None, false) => None,
     };
     let opens_tunnel = args.tunnel.is_some() || args.term;
+    if args.workspace.is_some() && !opens_tunnel {
+        bail!("--workspace requires --tunnel or --term");
+    }
 
     let data_dir = paths::ensure_ready().await?;
     let store = Store::open(&paths::db_path()?)?;
@@ -95,9 +99,11 @@ pub async fn run(args: RunArgs) -> Result<()> {
         true => Some(login::access_jwt().await?),
         false => None,
     };
-    let audience = match &private {
-        None => None,
-        Some(selector) => Some(login::resolve_workspace(selector).await?),
+    let owner = match opens_tunnel {
+        true => Some(
+            login::resolve_tunnel_workspace(args.workspace.as_deref(), private.as_deref()).await?,
+        ),
+        false => None,
     };
 
     let existing = match &args.name {
@@ -238,22 +244,29 @@ pub async fn run(args: RunArgs) -> Result<()> {
                     .clone()
                     .unwrap_or_else(crate::names::random_name);
                 let domain = crate::dist::domain();
-                let org = audience.as_ref().map(|(id, _)| id.as_str());
-                let who = audience.as_ref().map(|(_, label)| label.clone());
+                let org = owner
+                    .as_ref()
+                    .map(|(id, _)| id.as_str())
+                    .unwrap_or_default();
+                let workspace = owner
+                    .as_ref()
+                    .map(|(_, label)| label.as_str())
+                    .unwrap_or_default();
+                let is_private = private.is_some();
                 let term = args.term;
                 let announce = || {
-                    let suffix = match &who {
-                        Some(who) => format!(" (private: {who})"),
-                        None => String::new(),
-                    };
                     if let Some(port) = port {
                         println!(
-                            "(=^..^=)つ tunnel open: https://{sub}.{domain} -> sandbox:{port}{suffix}"
+                            "(=^..^=)つ tunnel open: https://{sub}.{domain} -> sandbox:{port}"
                         );
                     }
                     if term {
-                        println!("(=^..^=)つ terminal: https://{sub}.{domain}/__neko/term{suffix}");
+                        println!("(=^..^=)つ terminal: https://{sub}.{domain}/__neko/term");
                     }
+                    println!(
+                        "workspace: {workspace} · visibility: {}",
+                        if is_private { "private" } else { "public" },
+                    );
                     println!("press ctrl-c to stop");
                 };
                 let serve = tunnel::run(
@@ -262,6 +275,7 @@ pub async fn run(args: RunArgs) -> Result<()> {
                     Backend::Sandbox(dial_tx, port.unwrap_or(0)),
                     token.as_deref().unwrap_or_default(),
                     org,
+                    is_private,
                     args.term.then(|| tunnel::TermBridge {
                         shells: shell_tx.clone(),
                         exclusive: port.is_none(),

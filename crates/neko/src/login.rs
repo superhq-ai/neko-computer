@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use serde::Deserialize;
 
 const CLIENT_ID: &str = "neko";
@@ -183,6 +183,28 @@ pub async fn resolve_workspace(selector: &str) -> Result<(String, String)> {
     }
 }
 
+/// Ownership and visibility are separate. `--workspace` names the owner;
+/// `--private [workspace]` keeps its existing shorthand, and omission resolves
+/// deterministically to the personal SuperHQ workspace without a prompt.
+pub async fn resolve_tunnel_workspace(
+    workspace: Option<&str>,
+    private: Option<&str>,
+) -> Result<(String, String)> {
+    resolve_workspace(&tunnel_workspace_selector(workspace, private)?).await
+}
+
+fn tunnel_workspace_selector(workspace: Option<&str>, private: Option<&str>) -> Result<String> {
+    let private_workspace = private.filter(|selector| !selector.is_empty());
+    if let (Some(owner), Some(audience)) = (workspace, private_workspace) {
+        if owner != audience {
+            bail!(
+                "--workspace {owner} conflicts with --private {audience}; a private tunnel's owner and audience must match"
+            );
+        }
+    }
+    Ok(private_workspace.or(workspace).unwrap_or("").to_string())
+}
+
 /// Trade the stored SuperHQ session for a short-lived JWT the edge verifies
 /// offline against the issuer JWKS. Fetched fresh per connect.
 pub async fn access_jwt() -> Result<String> {
@@ -201,4 +223,32 @@ pub async fn access_jwt() -> Result<String> {
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
         .ok_or_else(|| anyhow!("no token in response"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tunnel_workspace_selector;
+
+    #[test]
+    fn tunnel_workspace_selection_is_deterministic_and_compatible() {
+        assert_eq!(tunnel_workspace_selector(None, None).unwrap(), "");
+        assert_eq!(
+            tunnel_workspace_selector(Some("acme"), None).unwrap(),
+            "acme"
+        );
+        assert_eq!(tunnel_workspace_selector(None, Some("")).unwrap(), "");
+        assert_eq!(
+            tunnel_workspace_selector(None, Some("acme")).unwrap(),
+            "acme"
+        );
+        assert_eq!(
+            tunnel_workspace_selector(Some("acme"), Some("")).unwrap(),
+            "acme"
+        );
+        assert_eq!(
+            tunnel_workspace_selector(Some("acme"), Some("acme")).unwrap(),
+            "acme"
+        );
+        assert!(tunnel_workspace_selector(Some("acme"), Some("other")).is_err());
+    }
 }
