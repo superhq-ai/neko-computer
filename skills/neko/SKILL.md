@@ -52,18 +52,32 @@ Leave it running; press ctrl-c to close the tunnel.
 
 ## Run in a sandbox and share it
 
-`neko run` boots an isolated Linux microVM, mounts the current directory at `/workspace`, runs the command there, and streams output. With `--tunnel` it also exposes the guest port to a public URL. Requires an aarch64 host (macOS on Apple Silicon, or Linux).
+`neko run` boots an isolated Linux microVM, mounts the current directory read-only at `/workspace`, runs the command there, and streams output. With `--tunnel` it also exposes the guest port to a public URL. Requires an aarch64 host (macOS on Apple Silicon, or Linux).
 
 ```bash
 # anonymous, ephemeral sandbox: serve the current dir and share it
 neko run --tunnel 8000 -- python3 -m http.server 8000
 ```
 
-The base image is a minimal Debian aarch64 with no language runtime, so the command must install what it needs. neko runs the command as argv directly, with no shell, so shell operators like `&&` need an explicit `sh -c`:
+The base image is a minimal Debian aarch64 with no language runtime, so the command must install what it needs — and installing needs `--allow-net`, since the sandbox has no network access by default. neko runs the command as argv directly, with no shell, so shell operators like `&&` need an explicit `sh -c`:
 
 ```bash
-neko run --tunnel 8000 -- sh -c 'apt-get update && apt-get install -y python3 && python3 -m http.server 8000'
+neko run --allow-net --tunnel 8000 -- sh -c 'apt-get update && apt-get install -y python3 && python3 -m http.server 8000'
 ```
+
+## The sandbox starts closed
+
+Two defaults differ from what a command usually expects. Both are printed at boot, so read that output before diagnosing a failure.
+
+```
+mounted /Users/you/project at /workspace (read-only; writes stay in the sandbox)
+networking: off (--allow-net to enable)
+```
+
+- **No network.** The guest boots with no network device, so `apt-get`, `npm install`, `pip`, and any outbound request fail. Pass `--allow-net` for open egress, or `--allow-host PATTERN` (repeatable, implies `--allow-net`) to allow only certain hosts, e.g. `--allow-host '*.npmjs.org'`. This does **not** affect `--tunnel`, `--port`, or `--term`: those reach the guest over vsock and work with networking off.
+- **The cwd mount is read-only, but writes still succeed.** The guest puts an overlay over the share, so `npm install`, build output, and generated files all work — they land in a scratch layer that is discarded when the sandbox exits (a `--checkpoint` does not keep it either). The user's real directory is never modified. Pass `--write` only when the point is to produce files on the host, e.g. a build whose output the user wants to keep.
+
+So a command that installs deps and serves needs `--allow-net` (or `--allow-host`) but usually not `--write`.
 
 ## Computers and checkpoints (instant boot)
 
@@ -73,7 +87,7 @@ A **computer** is a named, versioned sandbox (a branch). A **checkpoint** is an 
 
 ```bash
 # 1. provision once into a computer named "web", label the snapshot "ready"
-neko run web --checkpoint ready -- sh -c 'apt-get update && apt-get install -y python3'
+neko run web --allow-net --checkpoint ready -- sh -c 'apt-get update && apt-get install -y python3'
 
 # 2. boot from that checkpoint instantly and serve, sharing the port
 neko run web --from web@ready --tunnel 8000 -- python3 -m http.server 8000
@@ -106,6 +120,13 @@ neko run [NAME] [flags] -- COMMAND
 --private [SLUG]     only workspace members may visit (bare = personal workspace)
 --term               web terminal into the sandbox at /__neko/term (opens its own
                      private tunnel; combine with --tunnel to also expose a port)
+--allow-net          let the sandbox reach the network (off by default)
+--allow-host PAT     allow only these hosts, e.g. '*.npmjs.org' (repeatable,
+                     implies --allow-net)
+--write              mount the cwd read-write (read-only by default)
+--mount SPEC         mount a host dir: HOST:GUEST[:ro|:rw], read-only by default.
+                     Repeatable; replaces the default cwd mount
+--workdir PATH       where the command runs (default: first mount's guest path)
 --from REF           boot from a checkpoint (name or name@label)
 --checkpoint [LABEL] snapshot the disk on exit, optionally labelled
 ```
@@ -131,23 +152,25 @@ neko tunnel 5173 --subdomain preview
 ### Serve a static site from a sandbox
 
 ```bash
-neko run --tunnel 8000 -- sh -c 'apt-get update && apt-get install -y python3 && cd /workspace && python3 -m http.server 8000'
+neko run --allow-net --tunnel 8000 -- sh -c 'apt-get update && apt-get install -y python3 && cd /workspace && python3 -m http.server 8000'
 ```
 
 ### Reusable runtime, then fast serves
 
 ```bash
 # once: bake a node runtime into a checkpoint
-neko run app --checkpoint node -- sh -c 'apt-get update && apt-get install -y nodejs npm'
+neko run app --allow-net --checkpoint node -- sh -c 'apt-get update && apt-get install -y nodejs npm'
 
 # many times: instant boot, install deps from the mounted cwd, serve
-neko run app --from app@node --tunnel 3000 -- sh -c 'cd /workspace && npm install && npm run dev'
+# node_modules lands in the sandbox overlay, not the user's directory
+neko run app --from app@node --tunnel 3000 --allow-host '*.npmjs.org' \
+  -- sh -c 'cd /workspace && npm install && npm run dev'
 ```
 
 ### Expose a webhook receiver
 
 ```bash
-neko run --tunnel 4000 -- sh -c 'apt-get update && apt-get install -y python3 && cd /workspace && python3 webhook.py'
+neko run --allow-net --tunnel 4000 -- sh -c 'apt-get update && apt-get install -y python3 && cd /workspace && python3 webhook.py'
 # point the provider at https://<sub>.neko.computer
 ```
 
@@ -156,8 +179,9 @@ neko run --tunnel 4000 -- sh -c 'apt-get update && apt-get install -y python3 &&
 - **Login required.** Every tunnel needs `neko login` (a SuperHQ account). Quotas apply per account (daily and concurrent tunnel limits).
 - **`neko run` needs an aarch64 host.** It boots a real microVM (macOS on Apple Silicon, or Linux). `neko tunnel PORT` (local port) works anywhere.
 - **No shell by default.** `neko run -- CMD` execs argv directly. Use `-- sh -c '...'` for pipes, `&&`, redirects, or globs.
-- **Minimal base image.** The sandbox is a bare Debian aarch64 with no runtime. Install what you need inline, or bake it into a checkpoint.
-- **cwd is mounted at `/workspace`.** The command runs there.
+- **Minimal base image.** The sandbox is a bare Debian aarch64 with no runtime. Install what you need inline (with `--allow-net`), or bake it into a checkpoint.
+- **No network by default.** Anything outbound needs `--allow-net` or `--allow-host`. Tunnels, `--port`, and `--term` are unaffected.
+- **cwd is mounted read-only at `/workspace`.** The command runs there. Writes still succeed via an overlay but are discarded on exit; pass `--write` to put them on the host, `--mount` to mount somewhere else.
 - **Ephemeral unless named or checkpointed.** An anonymous `neko run` discards its disk on exit. Name it, or use `--checkpoint`, to keep state.
 - **The tunnel closes when the process exits.** Keep `neko run --tunnel` or `neko tunnel` in the foreground; ctrl-c ends it.
 

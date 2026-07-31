@@ -26,7 +26,7 @@ neko tunnel 3000                        # tunnel a local 127.0.0.1:3000 port (no
 neko run --port 3000 -- npm run dev     # reach the sandbox from your machine, no account
 neko run --tunnel 3000 -- npm run dev   # anonymous, ephemeral sandbox, public URL
 neko run alice --tunnel 3000 -- npm run dev            # a persistent named computer
-neko run base --checkpoint clean -- sh -c 'apt-get install -y python3'   # build a reusable checkpoint
+neko run base --allow-net --checkpoint clean -- sh -c 'apt-get install -y python3'   # build a reusable checkpoint
 neko run web --from base@clean --tunnel 3000 -- python3 -m http.server 3000
 ```
 
@@ -46,7 +46,28 @@ A **computer** is a named, versioned sandbox: a branch ref over a shared tree of
 
 ### Sandboxes
 
-`neko run` boots an isolated Linux microVM, mounts the current directory at `/workspace`, and runs the command there. argv is passed directly, with no shell, so pipes and `&&` need an explicit `sh -c`. The base image is a minimal Debian: install what the command needs inline, or bake it into a checkpoint. The image downloads on first run.
+`neko run` boots an isolated Linux microVM, mounts the current directory read-only at `/workspace`, and runs the command there. argv is passed directly, with no shell, so pipes and `&&` need an explicit `sh -c`. The base image is a minimal Debian: install what the command needs inline, or bake it into a checkpoint. The image downloads on first run.
+
+### What the sandbox may touch
+
+A sandbox starts closed, and each door is opened by a flag. Both defaults are printed at boot, so a command that trips over one has the reason in view.
+
+```
+neko run --allow-net -- sh -c 'apt-get update && apt-get install -y python3'
+neko run --allow-host '*.npmjs.org' -- npm install    # that host and no other
+neko run --write -- npm run build                     # keep the output on the host
+neko run --mount ~/data:/data --mount .:/src:rw -- ./build.sh
+```
+
+- **Networking is off.** The guest boots with no network device at all, so nothing reaches the internet and nothing leaves. `--allow-net` opens it; `--allow-host PATTERN` (repeatable, implies `--allow-net`) opens only the hosts you name, through a host-side proxy. Tunnels and `--port` are unaffected either way: they reach the guest over vsock, not over its network.
+- **The current directory is mounted read-only** at `/workspace`. This is not a wall the command hits: the guest lays an overlay over the share, so `npm install` and build output succeed and land in a scratch layer that goes away with the sandbox, leaving your tree untouched. `--write` shares it read-write instead, so writes are real. `--mount HOST:GUEST[:ro|:rw]` mounts elsewhere, is repeatable, and is read-only unless it ends in `:rw`; `--workdir` sets where the command runs, defaulting to the first mount's guest path.
+
+Installing at every boot is both slow and a reason to keep egress open. Bake the runtime into a checkpoint once with `--allow-net`, then boot from it offline:
+
+```
+neko run base --allow-net --checkpoint node -- sh -c 'apt-get update && apt-get install -y nodejs npm'
+neko run web --from base@node --tunnel 3000 -- npm start
+```
 
 ### Web terminal
 

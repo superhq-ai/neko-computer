@@ -1,6 +1,6 @@
 [package]
 name = "neko"
-version = "0.2.1"
+version = "0.3.0"
 description = "Expose shuru sandbox ports to the web"
 edition.workspace = true
 license.workspace = true

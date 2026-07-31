@@ -10,11 +10,10 @@ use tokio::task::LocalSet;
 use crate::commands::now;
 use crate::forward;
 use crate::login;
+use crate::mount;
 use crate::paths;
 use crate::store::Store;
 use crate::tunnel::{self, Backend, DialRequest};
-
-const WORKSPACE: &str = "/workspace";
 
 pub struct RunArgs {
     pub name: Option<String>,
@@ -24,17 +23,55 @@ pub struct RunArgs {
     pub subdomain: Option<String>,
     pub private: Option<String>,
     pub term: bool,
+    pub allow_net: bool,
+    pub allow_hosts: Vec<String>,
+    pub mounts: Vec<String>,
+    pub write: bool,
+    pub workdir: Option<String>,
     pub checkpoint: Option<Option<String>>,
     pub command: Vec<String>,
 }
 
+/// What the sandbox may touch, printed at boot so it is still on screen when
+/// the consequence arrives: an offline sandbox fails inside apt or npm, which
+/// have no way of knowing a neko flag is the reason.
+fn announce_policy(mounts: &[MountConfig], allow_net: bool, allow_hosts: &[String]) {
+    for m in mounts {
+        let mode = match m.read_only {
+            true => "read-only; writes stay in the sandbox",
+            false => "read-write",
+        };
+        println!("mounted {} at {} ({mode})", m.host_path, m.guest_path);
+    }
+    match (allow_net, allow_hosts.is_empty()) {
+        (false, _) => println!("networking: off (--allow-net to enable)"),
+        (true, true) => println!("networking: on (any host)"),
+        (true, false) => println!("networking: on ({})", allow_hosts.join(", ")),
+    }
+}
+
 pub async fn run(args: RunArgs) -> Result<()> {
-    // Reject a bad --port before spending a boot on it.
+    // Reject a bad --port or --mount before spending a boot on it.
     let mappings = args
         .ports
         .iter()
         .map(|spec| forward::parse(spec))
         .collect::<Result<Vec<_>>>()?;
+    let mounts = match args.mounts.is_empty() {
+        true => vec![mount::current_dir(!args.write)?],
+        false => args
+            .mounts
+            .iter()
+            .map(|spec| mount::parse(spec))
+            .collect::<Result<Vec<_>>>()?,
+    };
+    let workdir = match &args.workdir {
+        Some(dir) => dir.clone(),
+        None => mounts[0].guest_path.clone(),
+    };
+    // An allowlist is enforced by the proxy, which only runs with networking
+    // on, so naming a host is a way of asking for it.
+    let allow_net = args.allow_net || !args.allow_hosts.is_empty();
 
     if args.private.is_some() && args.tunnel.is_none() && !args.term {
         bail!("--private requires --tunnel or --term");
@@ -91,18 +128,16 @@ pub async fn run(args: RunArgs) -> Result<()> {
     println!("booting sandbox...");
     let sandbox = Rc::new(
         AsyncSandbox::boot(SandboxConfig {
-            allow_net: true,
+            allow_net,
+            allowed_hosts: args.allow_hosts.clone(),
             data_dir: Some(data_dir.to_string_lossy().into_owned()),
             from: boot_from,
-            mounts: vec![MountConfig {
-                host_path: std::env::current_dir()?.to_string_lossy().into_owned(),
-                guest_path: WORKSPACE.to_string(),
-                read_only: false,
-            }],
+            mounts: mounts.clone(),
             ..Default::default()
         })
         .await?,
     );
+    announce_policy(&mounts, allow_net, &args.allow_hosts);
 
     // Start the command, stream output, signal when it exits.
     let (done_tx, done_rx) = oneshot::channel::<()>();
@@ -111,7 +146,7 @@ pub async fn run(args: RunArgs) -> Result<()> {
     } else {
         let argv: Vec<&str> = args.command.iter().map(|s| s.as_str()).collect();
         let handle = sandbox
-            .open_shell(24, 80, Some(WORKSPACE), Some(&argv), HashMap::new())
+            .open_shell(24, 80, Some(&workdir), Some(&argv), HashMap::new())
             .await?;
         println!("started: {}", args.command.join(" "));
         let (writer, mut reader) = handle.split();
@@ -149,6 +184,7 @@ pub async fn run(args: RunArgs) -> Result<()> {
     let local = LocalSet::new();
     {
         let sb = sandbox.clone();
+        let shell_cwd = workdir.clone();
         local.spawn_local(async move {
             let mut shells_open = true;
             loop {
@@ -163,7 +199,7 @@ pub async fn run(args: RunArgs) -> Result<()> {
                     req = shell_rx.recv(), if shells_open => match req {
                         Some((rows, cols, reply)) => {
                             let shell = sb
-                                .open_shell(rows, cols, Some(WORKSPACE), None, HashMap::new())
+                                .open_shell(rows, cols, Some(&shell_cwd), None, HashMap::new())
                                 .await
                                 .map(|h| h.split());
                             let _ = reply.send(shell);
@@ -191,7 +227,6 @@ pub async fn run(args: RunArgs) -> Result<()> {
                 }
             }
             if !mappings.is_empty() && args.tunnel.is_none() {
-                println!("current dir mounted at {WORKSPACE}");
                 println!("press ctrl-c to stop");
             }
 
@@ -219,7 +254,6 @@ pub async fn run(args: RunArgs) -> Result<()> {
                     if term {
                         println!("(=^..^=)つ terminal: https://{sub}.{domain}/__neko/term{suffix}");
                     }
-                    println!("current dir mounted at {WORKSPACE}");
                     println!("press ctrl-c to stop");
                 };
                 let serve = tunnel::run(

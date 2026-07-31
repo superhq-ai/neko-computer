@@ -4,6 +4,7 @@ mod forward;
 mod github;
 mod login;
 mod mascot;
+mod mount;
 mod names;
 mod paths;
 mod run;
@@ -52,6 +53,26 @@ enum Command {
         /// names one); add --tunnel to also expose an app port.
         #[arg(long)]
         term: bool,
+        /// Let the sandbox reach the network. Off by default: the guest boots
+        /// with no network device at all, so nothing leaves it.
+        #[arg(long)]
+        allow_net: bool,
+        /// Let the sandbox reach these hosts and no others, as in
+        /// --allow-host '*.npmjs.org'. Repeatable. Implies --allow-net.
+        #[arg(long = "allow-host", value_name = "PATTERN")]
+        allow_hosts: Vec<String>,
+        /// Mount a host directory into the sandbox: --mount .:/src, or
+        /// --mount .:/src:rw to allow writes. Repeatable. Replaces the
+        /// default current-dir mount.
+        #[arg(long = "mount", value_name = "HOST:GUEST[:ro|:rw]")]
+        mounts: Vec<String>,
+        /// Mount the current directory read-write. It is read-only by default.
+        #[arg(long, conflicts_with = "mounts")]
+        write: bool,
+        /// Working directory for the command. Defaults to the guest path of
+        /// the first mount.
+        #[arg(long, value_name = "PATH")]
+        workdir: Option<String>,
         #[arg(long, num_args = 0..=1)]
         checkpoint: Option<Option<String>>,
         #[arg(last = true)]
@@ -100,6 +121,11 @@ async fn main() -> anyhow::Result<()> {
             subdomain,
             private,
             term,
+            allow_net,
+            allow_hosts,
+            mounts,
+            write,
+            workdir,
             checkpoint,
             command,
         } => {
@@ -111,6 +137,11 @@ async fn main() -> anyhow::Result<()> {
                 subdomain,
                 private,
                 term,
+                allow_net,
+                allow_hosts,
+                mounts,
+                write,
+                workdir,
                 checkpoint,
                 command,
             })
@@ -162,3 +193,7 @@ async fn main() -> anyhow::Result<()> {
 #[cfg(test)]
 #[path = "forward_tests.rs"]
 mod forward_tests;
+
+#[cfg(test)]
+#[path = "mount_tests.rs"]
+mod mount_tests;
